@@ -4,15 +4,15 @@ import micropython
 
 DIV_EPLISON = 1e-10
 
-ENABLE_EXPRIMENTAL_FEATURES = micropython.const(True)
-
 class Vector2D:
     def __init__(self, x: float, y: float):
         self.x = x
         self.y = y
     
     @micropython.native
-    def __eq__(self, other):
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Vector2D):
+            return False
         return self.x == other.x and self.y == other.y
 
     @micropython.native
@@ -82,9 +82,37 @@ class Vector2D:
 class Pos2D(Vector2D):
     pass
 
-class CollisionPoint:
+@micropython.native
+def inter_line_and_linesegment(line_pos: Pos2D, line_dir: Vector2D, seg_start: Pos2D, seg_end: Pos2D):
+    """计算点向式直线与线段的交点  
+    line_pos: 直线上一点  
+    line_dir: 直线方向向量。已经归一化  
+    seg_start: 线段起点  
+    seg_end: 线段终点  
+    返回交点坐标Pos2D，若无交点则返回None"""
+    # 线段方向向量
+    seg_dir = seg_end - seg_start
+    # 计算行列式
+    det = line_dir.cross(seg_dir)
+    if abs(det) < DIV_EPLISON:
+        # 平行或重合
+        return None
+    # 计算参数t和u
+    diff = seg_start - line_pos
+    t = diff.cross(seg_dir) / det
+    u = diff.cross(line_dir) / det
+    # 检查u是否在[0, 1]范围内
+    if u < 0 or u > 1:
+        return None
+    # 计算交点坐标
+    intersection = line_pos + line_dir * t
+    return intersection
+
+class CollisionEvent:
     """碰撞点。仅内部使用"""
     def __init__(self, 
+                 obj1: 'PhysicalObject',
+                obj2: 'PhysicalObject',
                  pos: Pos2D, 
                  normal: Vector2D
     ):
@@ -92,6 +120,8 @@ class CollisionPoint:
         pos: 碰撞点位置  
         normal: 碰撞点单位法向量
         """
+        self.obj1 = obj1
+        self.obj2 = obj2
         self.pos = pos
         self.normal = normal
 
@@ -108,6 +138,7 @@ class PhysicalObject:
             raise ValueError("Mass must be positive")
         self.name = repr(self)
         self.pos = pos
+        self.last_pos: Pos2D | None = None # 上一帧位置，供连续碰撞采样使用。仅在打开了该功能时使用
         self.mass = mass
         self.fixed = fixed
         self.extra_force = Vector2D(0, 0)
@@ -117,7 +148,7 @@ class PhysicalObject:
         """碰撞处理函数，参数: 碰撞点"""
         self.collision_energy_loss = 0.0
         """碰撞能量损失，0-1之间，0表示无能量损失，1表示完全能量损失"""
-    def collision(self, other):
+    def collision(self, other, phys: 'Physics2D') -> CollisionEvent | None:
         raise NotImplementedError
 
 class Circle(PhysicalObject):
@@ -133,7 +164,7 @@ class Circle(PhysicalObject):
         self.radius = radius
     
     @micropython.native
-    def collision(self, other: PhysicalObject):
+    def collision(self, other: PhysicalObject, phys: 'Physics2D'):
         if isinstance(other, Circle):
             # 提前计算一些数值
             pos_d = other.pos - self.pos # 指向other.pos
@@ -153,25 +184,26 @@ class Circle(PhysicalObject):
             # 穿透深度
             penetration = radius_sum - dis
 
-            # 按质量分配移动量
-            if not self.fixed and not other.fixed: # 实验性
-                # 仅在阈值范围内进行碰撞处理
-                # 方案1: 质量大的移动少
-                """
-                total_mass = self.mass + other.mass
-                self.pos += normal * (penetration * other.mass / total_mass)
-                other.pos -= normal * (penetration * self.mass / total_mass)
-                """
-                # 方案2: 按半径平均分配移动量
-                self.pos -= normal * (penetration * (other.radius / radius_sum))
-                other.pos += normal * (penetration * (self.radius / radius_sum))
-            elif self.fixed:
-                other.pos = pos + normal * other.radius * 2
-            elif other.fixed:
-                self.pos = pos - normal * self.radius * 2
-            return CollisionPoint(pos, normal)
+            # 运动校正
+            if phys.basic_correction_enabled:
+                if phys.extend_correction_enabled and not self.fixed and not other.fixed: # 实验性
+                    # 仅在阈值范围内进行碰撞处理
+                    # 方案1: 质量大的移动少
+                    """
+                    total_mass = self.mass + other.mass
+                    self.pos += normal * (penetration * other.mass / total_mass)
+                    other.pos -= normal * (penetration * self.mass / total_mass)
+                    """
+                    # 方案2: 按半径平均分配移动量
+                    self.pos -= normal * (penetration * (other.radius / radius_sum))
+                    other.pos += normal * (penetration * (self.radius / radius_sum))
+                elif self.fixed:
+                    other.pos = pos + normal * other.radius * 2
+                elif other.fixed:
+                    self.pos = pos - normal * self.radius * 2
+                return CollisionEvent(self, other, pos, normal)
         else:
-            return other.collision(self)
+            return other.collision(self, phys)
 
 class Line(PhysicalObject):
     def __init__(self, 
@@ -186,7 +218,7 @@ class Line(PhysicalObject):
         self.direction = direction.normalize()
     
     @micropython.native
-    def collision(self, other: PhysicalObject):
+    def collision(self, other: PhysicalObject, phys: 'Physics2D'):
         if isinstance(other, Line):
             raise NotImplementedError
         elif isinstance(other, Circle):
@@ -194,6 +226,19 @@ class Line(PhysicalObject):
             c = other.pos
             p = self.pos
             d = self.direction
+
+            # 连续采样：检测两帧之间的圆心运动轨迹是否与直线相交
+            if phys.continuous_collision_sampling_enabled and other.last_pos is not None:
+                intersection = inter_line_and_linesegment(p, d, other.last_pos, other.pos)
+                if intersection is not None:
+                    # 计算last_pos与intersection的垂足向量
+                    linepos_to_lastpos = other.last_pos - p
+                    normal = linepos_to_lastpos - d * (d * linepos_to_lastpos)
+                    normal = normal.normalize() # 指向circle.pos
+                    # 运动校正:如果线是固定的，将圆的坐标设置为恰好让线接触圆的边界而不进入圆内
+                    if phys.basic_correction_enabled and self.fixed:
+                        other.pos = intersection + normal * other.radius
+                    return CollisionEvent(self, other, intersection, normal)
 
             # 投影参数t
             t = d * (c - p)
@@ -218,13 +263,13 @@ class Line(PhysicalObject):
             else:
                 normal = vec.normalize()
 
-            # 优化:如果线是固定的，将圆的坐标设置为恰好让线接触圆的边界而不进入圆内
-            if self.fixed:
+            # 运动校正:如果线是固定的，将圆的坐标设置为恰好让线接触圆的边界而不进入圆内
+            if phys.basic_correction_enabled and self.fixed:
                 other.pos = foot + normal * other.radius
 
-            return CollisionPoint(foot, normal)
+            return CollisionEvent(self, other, foot, normal)
         else:
-            return other.collision(self)
+            return other.collision(self, phys)
     
     @micropython.native
     def intpos_in_rect(self, w: float, h: float):
@@ -257,7 +302,7 @@ class Line(PhysicalObject):
         )
 
         # 检查是否在边界内
-        points = []
+        points: list[tuple[float, float]] = []
         for t in t_values:
             x = x0 + dx * t
             y = y0 + dy * t
@@ -282,9 +327,15 @@ class Physics2D:
         self.global_force = Vector2D(0, 0)
         self.global_acceleration = Vector2D(0, 0)
         self.collision_handler = None
-        """collision_handler参数列表：obj1, obj2, collision_point"""
+        """collision_handler参数列表：collision_point"""
         self.update_callback = None
         """update_callback参数列表：dt"""
+        self.basic_correction_enabled = True
+        """基本穿透校正。能确保在大多数场景中不会出现异常"""
+        self.extend_correction_enabled = False
+        """更激进的穿透校正。在极端场景下可能会出现异常"""
+        self.continuous_collision_sampling_enabled = True
+        """基于数学的连续碰撞采样。在高速运动时能有效减少穿透现象，略微增加计算量"""
 
     @micropython.native
     def update_obj_move(self, obj: PhysicalObject, dt: float):
@@ -299,20 +350,24 @@ class Physics2D:
     def update_move(self, dt: float):
         """仅更新移动，不考虑碰撞"""
         for obj in self._active_objects:
+            if self.continuous_collision_sampling_enabled:
+                # 记录上一帧位置
+                obj.last_pos = Pos2D(obj.pos.x, obj.pos.y)
             self.update_obj_move(obj, dt)
     
     @micropython.native
     def update_collision(self):
         """更新碰撞"""
         # 碰撞检查与处理函数
+        @micropython.native
         def handle_collision(obj1: PhysicalObject, obj2: PhysicalObject):
             # 检查碰撞
-            collision_point = obj1.collision(obj2)
+            collision_point: CollisionEvent | None = obj1.collision(obj2, self)
             if collision_point is None:
                 return
             # 调用handler
             if self.collision_handler is not None:
-                self.collision_handler(obj1, obj2, collision_point)
+                self.collision_handler(collision_point)
             if obj1.collision_handler is not None:
                 obj1.collision_handler(collision_point)
             if obj2.collision_handler is not None:

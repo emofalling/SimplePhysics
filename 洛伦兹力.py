@@ -16,7 +16,7 @@ ball = Circle(
 # 给定初速度
 ball.velocity = Vector2D(10, 0)
 
-phys.objects.append(ball)
+phys.append(ball)
 
 ball_charge = 1.0
 lorenz_scale = 10.0

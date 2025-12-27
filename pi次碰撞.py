@@ -30,9 +30,9 @@ ball2 = Circle(
 
 ball2.velocity = Vector2D(-1, 0) # 速度太大会穿模
 
-phys.objects.append(pad)
-phys.objects.append(ball1)
-phys.objects.append(ball2)
+phys.append(pad)
+phys.append(ball1)
+phys.append(ball2)
 
 # ball1的碰撞次数
 ball1_count = 0

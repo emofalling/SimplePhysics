@@ -36,7 +36,7 @@ ball = Circle(
 )
 ball.name = "ball"
 # 0.5的动能损失
-ball.collision_energy_loss = 0.3
+ball.collision_energy_loss = 0.5
 
 # 击打的球
 hit_ball = Circle(
@@ -47,8 +47,9 @@ hit_ball = Circle(
 hit_ball.name = "hit_ball"
 
 
-phys.objects.append(ball)
-phys.objects.append(floor)
-phys.objects.append(slope)
-phys.objects.append(slope2)
-phys.objects.append(hit_ball)
+phys.append(ball)
+phys.append(floor)
+phys.append(slope)
+phys.append(slope2)
+phys.append(hit_ball)
+

@@ -18,10 +18,10 @@ ball = Circle(
     1
 )
 # 球的初速度
-ball.velocity = Vector2D(5, 0)
+ball.velocity = Vector2D(2, 0)
 # 动能损失
-ball.collision_energy_loss = 0.25
+ball.collision_energy_loss = 0.05
 
 # 添加到场景
-phys.objects.append(floor)
-phys.objects.append(ball)
+phys.append(floor)
+phys.append(ball)
