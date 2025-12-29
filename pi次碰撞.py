@@ -3,6 +3,11 @@ from physics2d import *
 
 phys = Physics2D()
 
+# 关闭“更激进的穿透校正”
+phys.extend_correction_enabled = False
+# 关闭“连续检测”
+# phys.continuous_collision_sampling_enabled = False
+
 # 左侧挡板
 pad = Line(
     Pos2D(1, 0), 
@@ -23,12 +28,12 @@ ball1 = Circle(
 ball2 = Circle(
     Pos2D(10, 10), 
     1.0,
-    100000000.0,
+    1000000.0,
 )
 
 # 有向左的初速度
 
-ball2.velocity = Vector2D(-1, 0) # 速度太大会穿模
+ball2.velocity = Vector2D(-0.5, 0) # 速度太大会穿模
 
 phys.append(pad)
 phys.append(ball1)

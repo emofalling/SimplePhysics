@@ -75,9 +75,9 @@ for i in range(2):
 
 
 
-scale = 3
-
+@micropython.native
 def drawAnObject(obj):
+    scale = 3
     if isinstance(obj, Circle):
         oled.circle(round(obj.pos.x*scale), SCR_HEIGHT-round(obj.pos.y*scale), round(obj.radius*scale), 1)
     elif isinstance(obj, Line):
@@ -87,6 +87,7 @@ def drawAnObject(obj):
         oled.line(round(start[0]*scale), SCR_HEIGHT-round(start[1]*scale), # type: ignore
                   round(end[0]*scale), SCR_HEIGHT-round(end[1]*scale), 1) # type: ignore
 
+@micropython.native
 def drawPhysics():
     oled.fill(0)
     for obj in phys._fixed_objects:
@@ -95,10 +96,21 @@ def drawPhysics():
         drawAnObject(obj)
     oled.show()
 
-td = 0.0
+@micropython.native
+def run():
+    td = 0.0
+    pause = False
+    while True:
+        ts = utime.ticks_us()
+        if button_a.is_pressed():
+            pause = not pause
+            oled.DispChar("Pause", 0, 0)
+            oled.show()
+            while button_a.is_pressed():
+                pass # 等待松开
+        if pause: continue
+        phys.update(td / 1000000)
+        drawPhysics()
+        td = utime.ticks_diff(utime.ticks_us(), ts)
 
-while True:
-    ts = utime.ticks_us()
-    phys.update(td / 1000000)
-    drawPhysics()
-    td = utime.ticks_diff(utime.ticks_us(), ts)
+run()

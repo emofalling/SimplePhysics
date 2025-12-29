@@ -4,6 +4,8 @@ from physics2d import *
 phys = Physics2D()
 # 全局重力
 phys.global_acceleration = Vector2D(0, -9.81)
+# 打开”更激进的碰撞修正“，可以减少两个球卡在一起的情况
+phys.extend_correction_enabled = True
 # 地面
 floor = Line(
     Pos2D(0, 1),
@@ -36,7 +38,7 @@ ball = Circle(
 )
 ball.name = "ball"
 # 0.5的动能损失
-ball.collision_energy_loss = 0.5
+ball.collision_energy_loss = 0
 
 # 击打的球
 hit_ball = Circle(
@@ -51,5 +53,5 @@ phys.append(ball)
 phys.append(floor)
 phys.append(slope)
 phys.append(slope2)
-phys.append(hit_ball)
+# phys.append(hit_ball)
 

@@ -124,12 +124,14 @@ class CollisionEvent:
         self.obj2 = obj2
         self.pos = pos
         self.normal = normal
+        self.obj1_last_velocity = obj1.velocity # 碰撞前速度
+        self.obj2_last_velocity = obj2.velocity # 碰撞前速度
 
 
 class PhysicalObject:
     """通用物理对象"""
     def __init__(self, 
-                 pos: Pos2D, 
+                 pos: Pos2D | tuple[float, float],
                  mass: float,
                  fixed: bool = False
     ):  
@@ -137,7 +139,10 @@ class PhysicalObject:
         if mass < DIV_EPLISON and not fixed:
             raise ValueError("Mass must be positive")
         self.name = repr(self)
-        self.pos = pos
+        if isinstance(pos, tuple):
+            self.pos = Pos2D(pos[0], pos[1])
+        elif isinstance(pos, Vector2D):
+            self.pos = pos
         self.last_pos: Pos2D | None = None # 上一帧位置，供连续碰撞采样使用。仅在打开了该功能时使用
         self.mass = mass
         self.fixed = fixed
@@ -145,7 +150,7 @@ class PhysicalObject:
         self.extra_acceleration = Vector2D(0, 0)
         self.velocity = Vector2D(0, 0)
         self.collision_handler = None
-        """碰撞处理函数，参数: 碰撞点"""
+        """碰撞处理函数，参数: 碰撞点。动量重分配之后调用。phys的collision_handler更优先"""
         self.collision_energy_loss = 0.0
         """碰撞能量损失，0-1之间，0表示无能量损失，1表示完全能量损失"""
     def collision(self, other, phys: 'Physics2D') -> CollisionEvent | None:
@@ -153,7 +158,7 @@ class PhysicalObject:
 
 class Circle(PhysicalObject):
     def __init__(self, 
-                 pos: Pos2D, 
+                 pos: Pos2D | tuple[float, float],
                  radius: float,
                  mass: float, 
                  fixed: bool = False
@@ -169,8 +174,14 @@ class Circle(PhysicalObject):
             # 提前计算一些数值
             pos_d = other.pos - self.pos # 指向other.pos
             radius_sum = self.radius + other.radius
-            # 碰撞位置：两圆心的加权中点
-            pos = self.pos + (pos_d) * (self.radius / radius_sum)
+            # 对于一方fixed,碰撞位置：固定圆的圆周上与另一圆心连线的交点
+            if self.fixed:
+                pos = self.pos + pos_d.normalize() * self.radius
+            elif other.fixed: # other.fixed
+                pos = other.pos - pos_d.normalize() * other.radius
+            # 对于双方均非fixed,碰撞位置：两圆心的加权中点
+            else:
+                pos = self.pos + (pos_d) * (self.radius / radius_sum)
             dis_square = pos_d.abs_square()
             # 若两圆心距离小于两圆半径之和，则碰撞。为优化逻辑，这里检查是否不碰撞
             if dis_square >= radius_sum ** 2:
@@ -186,7 +197,11 @@ class Circle(PhysicalObject):
 
             # 运动校正
             if phys.basic_correction_enabled:
-                if phys.extend_correction_enabled and not self.fixed and not other.fixed: # 实验性
+                if self.fixed:
+                    other.pos = pos + normal * other.radius
+                elif other.fixed:
+                    self.pos = pos - normal * self.radius
+                elif phys.extend_correction_enabled: # 双方均非fixed，且启用扩展校正
                     # 仅在阈值范围内进行碰撞处理
                     # 方案1: 质量大的移动少
                     """
@@ -197,22 +212,20 @@ class Circle(PhysicalObject):
                     # 方案2: 按半径平均分配移动量
                     self.pos -= normal * (penetration * (other.radius / radius_sum))
                     other.pos += normal * (penetration * (self.radius / radius_sum))
-                elif self.fixed:
-                    other.pos = pos + normal * other.radius * 2
-                elif other.fixed:
-                    self.pos = pos - normal * self.radius * 2
-                return CollisionEvent(self, other, pos, normal)
+            return CollisionEvent(self, other, pos, normal)
         else:
             return other.collision(self, phys)
 
 class Line(PhysicalObject):
     def __init__(self, 
-                 pos: Pos2D, 
-                 direction: Vector2D,
+                 pos: Pos2D | tuple[float, float],
+                 direction: Vector2D | tuple[float, float],
                  mass: float, 
                  fixed: bool = False
     ):
         super().__init__(pos, mass, fixed)
+        if isinstance(direction, tuple):
+            direction = Vector2D(direction[0], direction[1])
         if direction.abs_square() < DIV_EPLISON:
             raise ValueError("Direction vector cannot be zero")
         self.direction = direction.normalize()
@@ -327,7 +340,7 @@ class Physics2D:
         self.global_force = Vector2D(0, 0)
         self.global_acceleration = Vector2D(0, 0)
         self.collision_handler = None
-        """collision_handler参数列表：collision_point"""
+        """collision_handler参数列表：collision_point。优先于各物体的collision_handler调用"""
         self.update_callback = None
         """update_callback参数列表：dt"""
         self.basic_correction_enabled = True
@@ -365,13 +378,6 @@ class Physics2D:
             collision_point: CollisionEvent | None = obj1.collision(obj2, self)
             if collision_point is None:
                 return
-            # 调用handler
-            if self.collision_handler is not None:
-                self.collision_handler(collision_point)
-            if obj1.collision_handler is not None:
-                obj1.collision_handler(collision_point)
-            if obj2.collision_handler is not None:
-                obj2.collision_handler(collision_point)
             
             # 计算各自的动能保留率
             obj1_p = 1.0 - obj1.collision_energy_loss
@@ -417,6 +423,14 @@ class Physics2D:
             obj1.velocity = collision_point.normal * v1n + tangent * v1t # type: ignore
             obj2.velocity = collision_point.normal * v2n + tangent * v2t # type: ignore
 
+            # 调用handler
+            if self.collision_handler is not None:
+                self.collision_handler(collision_point)
+            if obj1.collision_handler is not None:
+                obj1.collision_handler(collision_point)
+            if obj2.collision_handler is not None:
+                obj2.collision_handler(collision_point)
+
         # 两两检查碰撞
         # 1. fixed-active
         for obj1 in self._fixed_objects:
@@ -441,7 +455,7 @@ class Physics2D:
             self._fixed_objects.append(obj)
         else:
             self._active_objects.append(obj)
-    def extend(self, objs: list):
+    def extend(self, objs: list[PhysicalObject]):
         for obj in objs:
             self.append(obj)
     def remove(self, obj: PhysicalObject):

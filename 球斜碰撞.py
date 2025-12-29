@@ -10,7 +10,7 @@ test = Circle(
 )
 # 待撞的球
 hit = Circle(
-    Pos2D(10, 8.9),
+    Pos2D(10, 10-math.sqrt(2)),
     1,
     1,
 )
@@ -20,5 +20,5 @@ hit = Circle(
 test.velocity = Vector2D(10, 0)
 
 # 添加到场景
-phys.objects.append(hit)
-phys.objects.append(test)
+phys.append(hit)
+phys.append(test)

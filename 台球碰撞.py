@@ -27,6 +27,6 @@ hit2 = Circle(
 test.velocity = Vector2D(10, 0)
 
 # 添加到场景
-phys.objects.append(hit1)
-phys.objects.append(hit2)
-phys.objects.append(test)
+phys.append(hit1)
+phys.append(hit2)
+phys.append(test)

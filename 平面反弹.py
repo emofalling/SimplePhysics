@@ -43,7 +43,7 @@ center_ball = Circle(
 )
 center_ball.name = "Ball Center"
 # 有右上的初速度
-center_ball.velocity = Vector2D(5, 5)
+center_ball.velocity = Vector2D(10, 10)
 # 自定义属性：颜色
 center_ball.color = (255, 0, 0) # type: ignore
 

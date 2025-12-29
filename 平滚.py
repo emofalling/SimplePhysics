@@ -23,5 +23,5 @@ ball.name = "ball"
 ball.velocity = Vector2D(5, 0)
 
 
-phys.objects.append(ball)
-phys.objects.append(floor)
+phys.append(ball)
+phys.append(floor)
